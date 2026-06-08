@@ -112,6 +112,13 @@ cargo test
 - The accept prompt is the only thing standing between you and a random file, so
   use it on networks you actually trust.
 
+## coming soon: Pyx goes global 🌍
+
+Right now Pyx only works between devices on the **same local network**. That's the
+plan to change. The next big thing is **sending files to anyone over the internet**
+— the same direct, encrypted, peer-to-peer transfer, just no longer stuck on your
+LAN. Stay tuned.
+
 ## license
 
 MIT — do whatever.

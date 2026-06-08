@@ -10,6 +10,8 @@ No cloud, no USB stick, no accounts. Open Pyx on two machines on the same Wi-Fi,
 drag a file (or a whole folder) onto the other one, and it just goes — straight
 across, encrypted, fast.
 
+**[pyx-app.vercel.app](https://pyx-app.vercel.app/)** — grab the download there.
+
 </div>
 
 ---
@@ -47,6 +49,11 @@ you drag stuff straight onto them. The bytes go directly between the two compute
 4. They hit Accept, and it flies over into their downloads.
 
 Done.
+
+## get it
+
+Grab the installer from **[pyx-app.vercel.app](https://pyx-app.vercel.app/)**
+(Windows for now). Or build it yourself — see below.
 
 ## what's under the hood
 

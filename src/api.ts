@@ -25,5 +25,11 @@ export const onTransferDone = (cb: (id: string) => void): Promise<UnlistenFn> =>
   listen<string>("transfer-done", (e) => cb(e.payload));
 export const onTransferDeclined = (cb: (id: string) => void): Promise<UnlistenFn> =>
   listen<string>("transfer-declined", (e) => cb(e.payload));
-export const onTransferError = (cb: (msg: string) => void): Promise<UnlistenFn> =>
-  listen<string>("transfer-error", (e) => cb(e.payload));
+export interface TransferErrorPayload {
+  id?: string;
+  error: string;
+}
+export const onTransferError = (
+  cb: (p: TransferErrorPayload) => void,
+): Promise<UnlistenFn> =>
+  listen<TransferErrorPayload>("transfer-error", (e) => cb(e.payload));

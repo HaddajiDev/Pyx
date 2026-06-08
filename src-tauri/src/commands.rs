@@ -66,7 +66,7 @@ pub async fn send_to_peer(
     };
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
 
-    let transfer_id = format!("out-{peer_id}-{}", paths.len());
+    let transfer_id = format!("out-{}", uuid::Uuid::new_v4());
     let app2 = app.clone();
     let tid = transfer_id.clone();
 
@@ -74,7 +74,10 @@ pub async fn send_to_peer(
         let endpoint = match make_client_endpoint() {
             Ok(e) => e,
             Err(e) => {
-                let _ = app2.emit("transfer-error", format!("{e}"));
+                let _ = app2.emit(
+                    "transfer-error",
+                    serde_json::json!({ "id": tid.clone(), "error": format!("{e}") }),
+                );
                 return;
             }
         };
@@ -82,12 +85,18 @@ pub async fn send_to_peer(
             Ok(c) => match c.await {
                 Ok(c) => c,
                 Err(e) => {
-                    let _ = app2.emit("transfer-error", format!("{e}"));
+                    let _ = app2.emit(
+                    "transfer-error",
+                    serde_json::json!({ "id": tid.clone(), "error": format!("{e}") }),
+                );
                     return;
                 }
             },
             Err(e) => {
-                let _ = app2.emit("transfer-error", format!("{e}"));
+                let _ = app2.emit(
+                    "transfer-error",
+                    serde_json::json!({ "id": tid.clone(), "error": format!("{e}") }),
+                );
                 return;
             }
         };
@@ -122,7 +131,10 @@ pub async fn send_to_peer(
                 let _ = app2.emit("transfer-done", &tid);
             }
             Err(e) => {
-                let _ = app2.emit("transfer-error", format!("{e}"));
+                let _ = app2.emit(
+                    "transfer-error",
+                    serde_json::json!({ "id": tid.clone(), "error": format!("{e}") }),
+                );
             }
         }
     });

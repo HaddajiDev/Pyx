@@ -122,6 +122,15 @@ export function IconTrash(p: IconProps) {
   );
 }
 
+export function IconClock(p: IconProps) {
+  return (
+    <svg {...base(p)} aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 6v6l4 2" />
+    </svg>
+  );
+}
+
 export function IconAlert(p: IconProps) {
   return (
     <svg {...base(p)} aria-hidden="true">

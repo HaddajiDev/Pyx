@@ -6,9 +6,15 @@ import type { Identity, Peer, IncomingOffer } from "./types";
 import * as api from "./api";
 import { PeerCard } from "./components/PeerCard";
 import { OfferModal } from "./components/OfferModal";
-import { TransferList, type TransferRow } from "./components/TransferList";
+import {
+  TransferList,
+  type Transfer,
+  type TransferFile,
+  type TransferState,
+} from "./components/TransferList";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { checkForUpdate, installUpdate, type Update } from "./updater";
+import { ensureNotifyPermission, notify } from "./notify";
 import { IconRadar, IconFolder, IconFolderOpen, IconAlert } from "./icons";
 
 interface Toast {
@@ -21,11 +27,15 @@ function folderName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+function plural(n: number): string {
+  return n === 1 ? "" : "s";
+}
+
 function App() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [offer, setOffer] = useState<IncomingOffer | null>(null);
-  const [transfers, setTransfers] = useState<TransferRow[]>([]);
+  const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [dragPeerId, setDragPeerId] = useState<string | null>(null);
   const [downloadDir, setDownloadDir] = useState<string>("");
   const [update, setUpdate] = useState<Update | null>(null);
@@ -33,7 +43,10 @@ function App() {
   const [updateProgress, setUpdateProgress] = useState(-1);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastSeq = useRef(0);
-  const speedSamples = useRef<Map<string, { bytes: number; t: number }>>(new Map());
+  const peersRef = useRef<Peer[]>([]);
+  peersRef.current = peers;
+  const transfersRef = useRef<Transfer[]>([]);
+  transfersRef.current = transfers;
 
   function pushToast(message: string) {
     const id = ++toastSeq.current;
@@ -41,23 +54,40 @@ function App() {
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 5000);
   }
 
-  function upsertTransfer(row: TransferRow) {
+  function upsertTransfer(t: Transfer) {
     setTransfers((prev) => {
-      const i = prev.findIndex((t) => t.id === row.id);
-      if (i === -1) return [...prev, row];
+      const i = prev.findIndex((x) => x.id === t.id);
+      if (i === -1) return [...prev, t];
       const copy = [...prev];
-      copy[i] = row;
+      copy[i] = t;
       return copy;
     });
   }
 
-  function setTransferState(id: string, state: TransferRow["state"]) {
-    setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, state } : t)));
+  function patchTransfer(id: string, fn: (t: Transfer) => Transfer) {
+    setTransfers((prev) => prev.map((t) => (t.id === id ? fn(t) : t)));
+  }
+
+  function setState(id: string, state: TransferState) {
+    patchTransfer(id, (t) => ({ ...t, state }));
   }
 
   async function handleSend(peerId: string, paths: string[]) {
     if (paths.length === 0) return;
-    await api.sendToPeer(peerId, paths);
+    const peer = peersRef.current.find((p) => p.peer_id === peerId);
+    const peerName = peer?.display_name ?? "device";
+    try {
+      const id = await api.sendToPeer(peerId, paths);
+      upsertTransfer({
+        id,
+        direction: "outgoing",
+        peer: peerName,
+        state: "pending",
+        files: [],
+      });
+    } catch (e) {
+      pushToast(`Couldn't start transfer: ${e}`);
+    }
   }
 
   async function changeFolder() {
@@ -87,34 +117,47 @@ function App() {
         setPeers((prev) => prev.filter((p) => p.peer_id !== id)),
       ),
     );
-    unlisteners.push(api.onIncomingOffer((o) => setOffer(o)));
+
     unlisteners.push(
-      api.onProgress((p) => {
-        const now = performance.now();
-        const prev = speedSamples.current.get(p.transfer_id);
-        let speed = 0;
-        if (prev && now > prev.t) {
-          speed = ((p.bytes - prev.bytes) / (now - prev.t)) * 1000;
-          if (speed < 0) speed = 0;
-        }
-        speedSamples.current.set(p.transfer_id, { bytes: p.bytes, t: now });
-        upsertTransfer({
-          id: p.transfer_id,
-          direction: p.direction,
-          fileName: p.file_name,
-          bytes: p.bytes,
-          total: p.total,
-          speed,
-          state: "transferring",
-        });
+      api.onIncomingOffer((o) => {
+        setOffer(o);
+        notify(
+          `${o.from_name} wants to send you ${o.files.length} file${plural(o.files.length)}`,
+          o.files.map((f) => f.name).slice(0, 4).join(", "),
+        );
       }),
     );
-    unlisteners.push(api.onTransferDone((id) => setTransferState(id, "done")));
+
     unlisteners.push(
-      api.onTransferDeclined((id) => setTransferState(id, "declined")),
+      api.onProgress((p) =>
+        patchOrCreateProgress(p.transfer_id, p.direction, p.file_name, p.bytes, p.total),
+      ),
     );
+
     unlisteners.push(
-      api.onTransferError((msg) => pushToast(`Transfer failed: ${msg}`)),
+      api.onTransferDone((id) => {
+        const t = transfersRef.current.find((x) => x.id === id);
+        if (t && t.direction === "incoming") {
+          notify(
+            "Files received",
+            `${t.files.length} file${plural(t.files.length)} from ${t.peer}`,
+          );
+        }
+        patchTransfer(id, (x) => ({
+          ...x,
+          state: "done",
+          files: x.files.map((f) => ({ ...f, bytes: f.total })),
+        }));
+      }),
+    );
+
+    unlisteners.push(api.onTransferDeclined((id) => setState(id, "declined")));
+
+    unlisteners.push(
+      api.onTransferError((p) => {
+        pushToast(`Transfer failed: ${p.error}`);
+        if (p.id) setState(p.id, "error");
+      }),
     );
 
     const dropUnlisten = getCurrentWebview().onDragDropEvent((event) => {
@@ -139,12 +182,52 @@ function App() {
     };
   }, []);
 
+  function patchOrCreateProgress(
+    id: string,
+    direction: "incoming" | "outgoing",
+    fileName: string,
+    bytes: number,
+    total: number,
+  ) {
+    setTransfers((prev) => {
+      const i = prev.findIndex((t) => t.id === id);
+      const updateFiles = (files: TransferFile[]): TransferFile[] => {
+        const fi = files.findIndex((f) => f.name === fileName);
+        if (fi === -1) return [...files, { name: fileName, bytes, total }];
+        const copy = [...files];
+        copy[fi] = { name: fileName, bytes, total };
+        return copy;
+      };
+      if (i === -1) {
+        return [
+          ...prev,
+          {
+            id,
+            direction,
+            peer: "device",
+            state: "transferring",
+            files: [{ name: fileName, bytes, total }],
+          },
+        ];
+      }
+      const t = prev[i];
+      const copy = [...prev];
+      copy[i] = {
+        ...t,
+        state: t.state === "done" ? "done" : "transferring",
+        files: updateFiles(t.files),
+      };
+      return copy;
+    });
+  }
+
   function cardAt(pos: { x: number; y: number }): HTMLElement | null {
     const el = document.elementFromPoint(pos.x, pos.y);
     return (el?.closest("[data-peer-id]") as HTMLElement | null) ?? null;
   }
 
   async function init() {
+    ensureNotifyPermission();
     setIdentity(await api.getIdentity());
     setPeers(await api.listPeers());
     try {
@@ -171,11 +254,22 @@ function App() {
 
   function respond(transferId: string, accept: boolean) {
     api.respondOffer(transferId, accept);
+    if (accept && offer) {
+      upsertTransfer({
+        id: offer.transfer_id,
+        direction: "incoming",
+        peer: offer.from_name,
+        state: "transferring",
+        files: offer.files.map((f) => ({ name: f.rel_path, bytes: 0, total: f.size })),
+      });
+    }
     setOffer(null);
   }
 
   function clearFinished() {
-    setTransfers((prev) => prev.filter((t) => t.state === "transferring"));
+    setTransfers((prev) =>
+      prev.filter((t) => t.state === "pending" || t.state === "transferring"),
+    );
   }
 
   return (
@@ -251,7 +345,9 @@ function App() {
                 />
               ))}
             </div>
-            <p className="hint">Drag files or folders onto a device, or click it to pick files.</p>
+            <p className="hint">
+              Drag files or folders onto a device, or use its Files / Folder buttons.
+            </p>
           </section>
         )}
 

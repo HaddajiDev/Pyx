@@ -4,22 +4,34 @@ import {
   IconUpload,
   IconX,
   IconAlert,
+  IconClock,
   IconFolderOpen,
   IconTrash,
 } from "../icons";
 
-export interface TransferRow {
-  id: string;
-  direction: "incoming" | "outgoing";
-  fileName: string;
+export type TransferState =
+  | "pending"
+  | "transferring"
+  | "done"
+  | "declined"
+  | "error";
+
+export interface TransferFile {
+  name: string;
   bytes: number;
   total: number;
-  speed: number; // bytes/sec, 0 when unknown
-  state: "transferring" | "done" | "declined" | "error";
+}
+
+export interface Transfer {
+  id: string;
+  direction: "incoming" | "outgoing";
+  peer: string;
+  state: TransferState;
+  files: TransferFile[];
 }
 
 interface Props {
-  transfers: TransferRow[];
+  transfers: Transfer[];
   onOpenFolder: () => void;
   onClear: () => void;
 }
@@ -35,7 +47,13 @@ function humanSize(bytes: number): string {
   return `${i === 0 ? n : n.toFixed(1)} ${units[i]}`;
 }
 
-function StateBadge({ state, pct }: { state: TransferRow["state"]; pct: number }) {
+function Badge({ state, pct }: { state: TransferState; pct: number }) {
+  if (state === "pending")
+    return (
+      <span className="badge badge-pending">
+        <IconClock size={13} /> Waiting
+      </span>
+    );
   if (state === "transferring")
     return <span className="badge badge-active">{pct}%</span>;
   if (state === "done")
@@ -57,9 +75,81 @@ function StateBadge({ state, pct }: { state: TransferRow["state"]; pct: number }
   );
 }
 
+function TransferCard({ t }: { t: Transfer }) {
+  const totalBytes = t.files.reduce((a, f) => a + f.bytes, 0);
+  const totalSize = t.files.reduce((a, f) => a + f.total, 0);
+  const pct = totalSize > 0 ? Math.round((totalBytes / totalSize) * 100) : 0;
+  const incoming = t.direction === "incoming";
+
+  return (
+    <div className="xfer-card">
+      <div className="xfer-head">
+        <span className={`xfer-dir xfer-dir-${t.direction}`}>
+          {incoming ? <IconDownload size={16} /> : <IconUpload size={16} />}
+        </span>
+        <div className="xfer-peer">
+          <span className="xfer-peer-name">
+            {incoming ? "From" : "To"} {t.peer || "device"}
+          </span>
+          <span className="xfer-peer-sub">
+            {t.files.length > 0
+              ? `${t.files.length} file${t.files.length === 1 ? "" : "s"}`
+              : "—"}
+          </span>
+        </div>
+        <Badge state={t.state} pct={t.state === "done" ? 100 : pct} />
+      </div>
+
+      {t.state === "pending" ? (
+        <p className="xfer-note">Waiting for {t.peer || "the other device"} to accept…</p>
+      ) : t.state === "declined" ? (
+        <p className="xfer-note">{t.peer || "The other device"} declined the transfer.</p>
+      ) : t.files.length > 0 ? (
+        <ul className="xfer-files">
+          {t.files.map((f) => {
+            const fp = f.total > 0 ? Math.round((f.bytes / f.total) * 100) : 0;
+            const done = t.state === "done" || fp >= 100;
+            return (
+              <li className="xfer-file" key={f.name}>
+                <span className="xfer-file-name" title={f.name}>
+                  {f.name}
+                </span>
+                <span className="xfer-bar">
+                  <span
+                    className={`xfer-bar-fill${done ? " is-done" : ""}`}
+                    style={{ width: `${t.state === "done" ? 100 : fp}%` }}
+                  />
+                </span>
+                <span className="xfer-file-meta">
+                  {humanSize(f.bytes)} / {humanSize(f.total)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function Group({ title, items }: { title: string; items: Transfer[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="xfer-group">
+      <h3 className="xfer-group-title">{title}</h3>
+      <div className="xfer-list">
+        {items.map((t) => (
+          <TransferCard key={t.id} t={t} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function TransferList({ transfers, onOpenFolder, onClear }: Props) {
   if (transfers.length === 0) return null;
-  const hasFinished = transfers.some((t) => t.state !== "transferring");
+  const outgoing = transfers.filter((t) => t.direction === "outgoing");
+  const incoming = transfers.filter((t) => t.direction === "incoming");
 
   return (
     <section className="transfers" aria-label="Transfers">
@@ -69,65 +159,14 @@ export function TransferList({ transfers, onOpenFolder, onClear }: Props) {
           <button type="button" className="icon-btn" onClick={onOpenFolder} title="Open download folder">
             <IconFolderOpen size={15} /> Folder
           </button>
-          {hasFinished && (
-            <button type="button" className="icon-btn" onClick={onClear} title="Clear finished transfers">
-              <IconTrash size={15} /> Clear
-            </button>
-          )}
+          <button type="button" className="icon-btn" onClick={onClear} title="Clear finished transfers">
+            <IconTrash size={15} /> Clear
+          </button>
         </div>
       </div>
 
-      <ul className="transfer-list">
-        {transfers.map((t) => {
-          const pct = t.total > 0 ? Math.round((t.bytes / t.total) * 100) : 0;
-          const failed = t.state === "error" || t.state === "declined";
-          const active = t.state === "transferring";
-          return (
-            <li className="transfer-row" key={t.id + t.fileName}>
-              <span
-                className={`transfer-dir transfer-dir-${t.direction}`}
-                aria-label={t.direction === "incoming" ? "Receiving" : "Sending"}
-              >
-                {t.direction === "incoming" ? (
-                  <IconDownload size={16} />
-                ) : (
-                  <IconUpload size={16} />
-                )}
-              </span>
-
-              <div className="transfer-body">
-                <div className="transfer-top">
-                  <span className="transfer-name" title={t.fileName}>
-                    {t.fileName || "…"}
-                  </span>
-                  <StateBadge state={t.state} pct={pct} />
-                </div>
-                <span
-                  className="transfer-bar"
-                  role="progressbar"
-                  aria-valuenow={pct}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                >
-                  <span
-                    className={`transfer-bar-fill${t.state === "done" ? " is-done" : ""}${
-                      failed ? " is-failed" : ""
-                    }`}
-                    style={{ width: `${failed ? 100 : pct}%` }}
-                  />
-                </span>
-                <div className="transfer-meta">
-                  <span>
-                    {humanSize(t.bytes)}
-                    {t.total > 0 && ` / ${humanSize(t.total)}`}
-                  </span>
-                  {active && t.speed > 0 && <span>{humanSize(t.speed)}/s</span>}
-                </div>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      <Group title="Sending" items={outgoing} />
+      <Group title="Receiving" items={incoming} />
     </section>
   );
 }

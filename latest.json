@@ -1,11 +1,11 @@
 {
-  "version": "0.2.0",
-  "notes": "Bigger window on first open, plus polish.",
+  "version": "0.3.0",
+  "notes": "Send folders, clearer transfer status (waiting/declined), reworked transfers panel, runs in the system tray, and desktop notifications.",
   "pub_date": "2026-06-08T00:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRWGRqZDdhRGdMbWdDaDNPQlZtSXQxN0lNbHVMS1NzT094Yng5NWZiOVh1cjlPYlVpelg2blFYZzBwUGI4dXhRR3RBQ3FIbGdjckFKbU1SdzhUSWhIcEhYd2pwWmpMcHd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwOTQ2NDU0CWZpbGU6UHl4XzAuMi4wX3g2NC1zZXR1cC5leGUKQlJNZjVOYnJxYlYrdjRWNXRkUkQrUVpvN1VxS0VSM1NNaGlqUEUyWEx5cHZCTlpzVXVQcTRkNlNIZ2RscXc4RmQ1Q0NrU1ZqanVTMU5tS2lwc2xFQWc9PQo=",
-      "url": "https://f003.backblazeb2.com/file/dev67bucket/pyx/Pyx_0.2.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRWGRqZDdhRGdMbWtsTGJrcmdYdlJ0dWlpdnhObFB3VEVRRXR2T0QxL05oMmZzZ2N3N0xOTG5UdEVGalBJYit4MldQa1NnSFE0RzB4T011bW4yQTJmVktsSHV0MGNmK0FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwOTU1Mjc3CWZpbGU6UHl4XzAuMy4wX3g2NC1zZXR1cC5leGUKSksvcWRNTE10ZFozaXBjR0JUczd3WkVpRFBBU2ZYVWVZVEV3OUs0dkMrekdKUjN6TERXU1RlVjh3NGc1V0huTkx4VHRRd0N4SWVTdXo0SENpRnRLQlE9PQo=",
+      "url": "https://f003.backblazeb2.com/file/dev67bucket/pyx/Pyx_0.3.0_x64-setup.exe"
     }
   }
 }

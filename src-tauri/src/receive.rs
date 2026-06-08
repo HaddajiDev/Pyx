@@ -134,7 +134,7 @@ pub async fn run_server(endpoint: Endpoint, app: AppHandle, state: Arc<AppState>
             let app_for_progress = app.clone();
             let tid_progress = transfer_id.clone();
 
-            let _ = receive_transfer(
+            let outcome = receive_transfer(
                 &conn,
                 &dest_dir,
                 move |offer: Offer| {
@@ -171,6 +171,10 @@ pub async fn run_server(endpoint: Endpoint, app: AppHandle, state: Arc<AppState>
                 },
             )
             .await;
+
+            if matches!(outcome, Ok(ref o) if o.accepted) {
+                let _ = app.emit("transfer-done", &transfer_id);
+            }
         });
     }
 }

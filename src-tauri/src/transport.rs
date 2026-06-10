@@ -13,6 +13,16 @@ pub fn ensure_crypto_provider() {
     });
 }
 
+fn transport_config() -> Arc<quinn::TransportConfig> {
+    let mut tc = quinn::TransportConfig::default();
+    let idle = std::time::Duration::from_secs(60)
+        .try_into()
+        .expect("valid idle timeout");
+    tc.max_idle_timeout(Some(idle));
+    tc.keep_alive_interval(Some(std::time::Duration::from_secs(15)));
+    Arc::new(tc)
+}
+
 fn generate_self_signed() -> Result<(CertificateDer<'static>, PrivatePkcs8KeyDer<'static>), Box<dyn Error>> {
     let cert = rcgen::generate_simple_self_signed(vec!["filedrop.local".to_string()])?;
     let cert_der = CertificateDer::from(cert.cert);
@@ -24,8 +34,7 @@ pub fn make_server_endpoint() -> Result<Endpoint, Box<dyn Error>> {
     ensure_crypto_provider();
     let (cert, key) = generate_self_signed()?;
     let mut server_config = ServerConfig::with_single_cert(vec![cert], key.into())?;
-    let transport = Arc::get_mut(&mut server_config.transport).unwrap();
-    transport.max_idle_timeout(Some(std::time::Duration::from_secs(30).try_into()?));
+    server_config.transport = transport_config();
     let addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
     let endpoint = Endpoint::server(server_config, addr)?;
     Ok(endpoint)
@@ -87,9 +96,10 @@ pub fn make_client_endpoint() -> Result<Endpoint, Box<dyn Error>> {
         .dangerous()
         .with_custom_certificate_verifier(SkipServerVerification::new())
         .with_no_client_auth();
-    let client_config = ClientConfig::new(Arc::new(
+    let mut client_config = ClientConfig::new(Arc::new(
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?,
     ));
+    client_config.transport_config(transport_config());
     let addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
     let mut endpoint = Endpoint::client(addr)?;
     endpoint.set_default_client_config(client_config);

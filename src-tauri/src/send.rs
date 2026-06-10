@@ -63,14 +63,16 @@ async fn plan_files(
     Ok(out)
 }
 
-pub async fn send_files<F>(
+pub async fn send_files<O, F>(
     conn: &Connection,
     from_name: String,
     from_peer_id: String,
     paths: Vec<PathBuf>,
+    on_offer: O,
     mut on_progress: F,
 ) -> Result<SendOutcome, Box<dyn std::error::Error + Send + Sync>>
 where
+    O: FnOnce(&[OfferedFile]),
     F: FnMut(&str, u64, u64),
 {
     let plan = plan_files(paths).await?;
@@ -83,6 +85,8 @@ where
         })
         .collect();
     let total_size = plan.iter().map(|f| f.size).sum();
+
+    on_offer(&offered);
 
     let (mut ctrl_send, mut ctrl_recv) = conn.open_bi().await?;
     let offer = Offer { from_name, from_peer_id, files: offered.clone(), total_size };

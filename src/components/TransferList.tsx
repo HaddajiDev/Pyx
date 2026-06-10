@@ -78,8 +78,13 @@ function Badge({ state, pct }: { state: TransferState; pct: number }) {
 function TransferCard({ t }: { t: Transfer }) {
   const totalBytes = t.files.reduce((a, f) => a + f.bytes, 0);
   const totalSize = t.files.reduce((a, f) => a + f.total, 0);
-  const pct = totalSize > 0 ? Math.round((totalBytes / totalSize) * 100) : 0;
+  const pct =
+    t.state === "done" ? 100 : totalSize > 0 ? Math.round((totalBytes / totalSize) * 100) : 0;
   const incoming = t.direction === "incoming";
+  const failed = t.state === "error";
+  const showFiles =
+    t.files.length > 0 && t.state !== "pending" && t.state !== "declined";
+  const showBar = t.state === "transferring" || t.state === "done" || failed;
 
   return (
     <div className="xfer-card">
@@ -93,35 +98,56 @@ function TransferCard({ t }: { t: Transfer }) {
           </span>
           <span className="xfer-peer-sub">
             {t.files.length > 0
-              ? `${t.files.length} file${t.files.length === 1 ? "" : "s"}`
-              : "—"}
+              ? `${t.files.length} file${t.files.length === 1 ? "" : "s"} · ${humanSize(totalSize)}`
+              : incoming
+                ? "Receiving…"
+                : "Preparing…"}
           </span>
         </div>
-        <Badge state={t.state} pct={t.state === "done" ? 100 : pct} />
+        <Badge state={t.state} pct={pct} />
       </div>
 
+      {showBar && (
+        <div className="xfer-overall">
+          <span
+            className={`xfer-bar-fill${t.state === "done" ? " is-done" : ""}${
+              failed ? " is-failed" : ""
+            }`}
+            style={{ width: `${failed ? 100 : pct}%` }}
+          />
+        </div>
+      )}
+
       {t.state === "pending" ? (
-        <p className="xfer-note">Waiting for {t.peer || "the other device"} to accept…</p>
+        <p className="xfer-note">
+          Waiting for {t.peer || "the other device"} to accept…
+        </p>
       ) : t.state === "declined" ? (
-        <p className="xfer-note">{t.peer || "The other device"} declined the transfer.</p>
-      ) : t.files.length > 0 ? (
+        <p className="xfer-note">
+          {t.peer || "The other device"} declined the transfer.
+        </p>
+      ) : showFiles ? (
         <ul className="xfer-files">
           {t.files.map((f) => {
-            const fp = f.total > 0 ? Math.round((f.bytes / f.total) * 100) : 0;
-            const done = t.state === "done" || fp >= 100;
+            const fp =
+              t.state === "done"
+                ? 100
+                : f.total > 0
+                  ? Math.round((f.bytes / f.total) * 100)
+                  : 0;
+            const fdone = fp >= 100;
             return (
               <li className="xfer-file" key={f.name}>
+                {fdone ? (
+                  <IconCheck size={13} className="xfer-file-tick" />
+                ) : (
+                  <span className="xfer-file-dot" />
+                )}
                 <span className="xfer-file-name" title={f.name}>
                   {f.name}
                 </span>
-                <span className="xfer-bar">
-                  <span
-                    className={`xfer-bar-fill${done ? " is-done" : ""}`}
-                    style={{ width: `${t.state === "done" ? 100 : fp}%` }}
-                  />
-                </span>
                 <span className="xfer-file-meta">
-                  {humanSize(f.bytes)} / {humanSize(f.total)}
+                  {fdone ? humanSize(f.total) : `${fp}%`}
                 </span>
               </li>
             );
@@ -136,7 +162,9 @@ function Group({ title, items }: { title: string; items: Transfer[] }) {
   if (items.length === 0) return null;
   return (
     <div className="xfer-group">
-      <h3 className="xfer-group-title">{title}</h3>
+      <h3 className="xfer-group-title">
+        {title} <span className="xfer-group-count">{items.length}</span>
+      </h3>
       <div className="xfer-list">
         {items.map((t) => (
           <TransferCard key={t.id} t={t} />

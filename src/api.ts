@@ -1,6 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Identity, Peer, IncomingOffer, ProgressEvent } from "./types";
+import type {
+  Identity,
+  Peer,
+  IncomingOffer,
+  OfferedFile,
+  ProgressEvent,
+} from "./types";
+
+export interface OutgoingFiles {
+  transfer_id: string;
+  files: OfferedFile[];
+}
 
 export const getIdentity = () => invoke<Identity>("get_identity");
 export const listPeers = () => invoke<Peer[]>("list_peers");
@@ -21,6 +32,10 @@ export const onIncomingOffer = (cb: (o: IncomingOffer) => void): Promise<Unliste
   listen<IncomingOffer>("incoming-offer", (e) => cb(e.payload));
 export const onProgress = (cb: (p: ProgressEvent) => void): Promise<UnlistenFn> =>
   listen<ProgressEvent>("transfer-progress", (e) => cb(e.payload));
+export const onOutgoingFiles = (
+  cb: (p: OutgoingFiles) => void,
+): Promise<UnlistenFn> =>
+  listen<OutgoingFiles>("transfer-files", (e) => cb(e.payload));
 export const onTransferDone = (cb: (id: string) => void): Promise<UnlistenFn> =>
   listen<string>("transfer-done", (e) => cb(e.payload));
 export const onTransferDeclined = (cb: (id: string) => void): Promise<UnlistenFn> =>

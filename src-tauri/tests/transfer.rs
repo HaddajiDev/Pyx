@@ -48,6 +48,7 @@ async fn sends_two_files_end_to_end_and_verifies_contents() {
         "Tester".into(),
         "peer-1".into(),
         vec![f1.clone(), f2.clone()],
+        |_files| {},
         |_name, _b, _t| {},
     )
     .await
@@ -90,7 +91,9 @@ async fn rejected_offer_writes_nothing() {
 
     let client = make_client_endpoint().unwrap();
     let conn = client.connect(server_addr, "filedrop.local").unwrap().await.unwrap();
-    let outcome = send_files(&conn, "T".into(), "p".into(), vec![f1], |_, _, _| {}).await.unwrap();
+    let outcome = send_files(&conn, "T".into(), "p".into(), vec![f1], |_| {}, |_, _, _| {})
+        .await
+        .unwrap();
     let recv_outcome = recv_task.await.unwrap();
 
     assert!(!outcome.accepted);
@@ -129,7 +132,7 @@ async fn sends_a_folder_preserving_structure() {
         .unwrap()
         .await
         .unwrap();
-    let outcome = send_files(&conn, "T".into(), "p".into(), vec![proj.clone()], |_, _, _| {})
+    let outcome = send_files(&conn, "T".into(), "p".into(), vec![proj.clone()], |_| {}, |_, _, _| {})
         .await
         .unwrap();
     let recv_outcome = recv_task.await.unwrap();

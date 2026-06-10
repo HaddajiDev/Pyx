@@ -103,11 +103,19 @@ pub async fn send_to_peer(
 
         let app3 = app2.clone();
         let tid2 = tid.clone();
+        let app_offer = app2.clone();
+        let tid_offer = tid.clone();
         let result = crate::send::send_files(
             &conn,
             from_name,
             from_peer_id,
             paths,
+            move |files: &[crate::protocol::OfferedFile]| {
+                let _ = app_offer.emit(
+                    "transfer-files",
+                    serde_json::json!({ "transfer_id": tid_offer, "files": files }),
+                );
+            },
             move |rel_path, bytes, total| {
                 let _ = app3.emit(
                     "transfer-progress",

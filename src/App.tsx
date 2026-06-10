@@ -129,6 +129,18 @@ function App() {
     );
 
     unlisteners.push(
+      api.onOutgoingFiles((p) =>
+        patchTransfer(p.transfer_id, (t) => ({
+          ...t,
+          files: p.files.map((f) => {
+            const existing = t.files.find((x) => x.name === f.rel_path);
+            return { name: f.rel_path, bytes: existing?.bytes ?? 0, total: f.size };
+          }),
+        })),
+      ),
+    );
+
+    unlisteners.push(
       api.onProgress((p) =>
         patchOrCreateProgress(p.transfer_id, p.direction, p.file_name, p.bytes, p.total),
       ),

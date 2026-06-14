@@ -14,12 +14,12 @@ jobs:
     runs-on: windows-latest
 
     env:
-      B2_BUCKET: ${{ vars.B2_BUCKET }}
-      B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
-      AWS_DEFAULT_REGION: ${{ vars.B2_REGION }}
+      B2_BUCKET: dev67bucket
+      B2_S3_ENDPOINT: https://s3.eu-central-003.backblazeb2.com
+      AWS_DEFAULT_REGION: eu-central-003
+      PUBLIC_BASE: https://f003.backblazeb2.com/file/dev67bucket/pyx
       AWS_ACCESS_KEY_ID: ${{ secrets.B2_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APP_KEY }}
-      PUBLIC_BASE: ${{ vars.PYX_PUBLIC_BASE }}
 
     steps:
       - uses: actions/checkout@v4

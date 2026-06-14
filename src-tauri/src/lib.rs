@@ -33,6 +33,12 @@ pub fn run() {
     let app_state = Arc::new(AppState::new(identity));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // A second launch focuses the existing window instead of starting a
+            // duplicate process (which would create a second tray icon and a
+            // second mDNS advertisement).
+            show_main(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -44,6 +50,7 @@ pub fn run() {
             commands::list_peers,
             commands::respond_offer,
             commands::send_to_peer,
+            commands::set_display_name,
             commands::get_download_dir,
             commands::set_download_dir,
             commands::open_download_dir,

@@ -29,6 +29,20 @@ fn base_name(path: &std::path::Path) -> String {
         .to_string()
 }
 
+async fn hash_file(path: &std::path::Path) -> std::io::Result<String> {
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut hasher = Hasher::new();
+    let mut buf = vec![0u8; CHUNK];
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher.finalize_hex())
+}
+
 async fn plan_files(
     inputs: Vec<PathBuf>,
 ) -> Result<Vec<PlannedFile>, Box<dyn std::error::Error + Send + Sync>> {
@@ -100,37 +114,40 @@ where
 
     let mut files_sent = 0usize;
     for planned in &plan {
-        let mut file = tokio::fs::File::open(&planned.abs).await?;
-        let mut hasher = Hasher::new();
-        let mut buf = vec![0u8; CHUNK];
-        loop {
-            let n = file.read(&mut buf).await?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buf[..n]);
-        }
-        let blake3_hex = hasher.finalize_hex();
+        // A file we can't read (locked, permission-denied, vanished) must NOT
+        // abort the whole folder transfer. We still open the per-file stream so
+        // the receiver's stream count stays in sync, but send a placeholder
+        // header + empty body; the receiver's integrity check then rejects just
+        // that one file and the transfer continues.
+        let hash = hash_file(&planned.abs).await.ok();
 
         let mut body = conn.open_uni().await?;
         let header = FileHeader {
             name: base_name(&planned.abs),
             rel_path: planned.rel.clone(),
             size: planned.size,
-            blake3_hex,
+            blake3_hex: hash.clone().unwrap_or_default(),
         };
         write_msg(&mut body, &header).await?;
 
-        let mut file = tokio::fs::File::open(&planned.abs).await?;
-        let mut sent: u64 = 0;
-        loop {
-            let n = file.read(&mut buf).await?;
-            if n == 0 {
-                break;
+        if hash.is_some() {
+            if let Ok(mut file) = tokio::fs::File::open(&planned.abs).await {
+                let mut buf = vec![0u8; CHUNK];
+                let mut sent: u64 = 0;
+                loop {
+                    match file.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            body.write_all(&buf[..n]).await?;
+                            sent += n as u64;
+                            on_progress(&planned.rel, sent, planned.size);
+                        }
+                        // File read error mid-stream: stop sending bytes; the
+                        // receiver sees a size mismatch and rejects this file.
+                        Err(_) => break,
+                    }
+                }
             }
-            body.write_all(&buf[..n]).await?;
-            sent += n as u64;
-            on_progress(&planned.rel, sent, planned.size);
         }
         body.finish()?;
 

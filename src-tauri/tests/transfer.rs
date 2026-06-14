@@ -146,3 +146,60 @@ async fn sends_a_folder_preserving_structure() {
     assert_eq!(got_main, b"fn main() {}");
     assert_eq!(got_util, vec![9u8; 100_000]);
 }
+
+#[cfg(windows)]
+#[tokio::test]
+async fn folder_transfer_survives_a_locked_source_file() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let src = tempfile::tempdir().unwrap();
+    let proj = src.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    std::fs::write(proj.join("a.txt"), b"first file").unwrap();
+    std::fs::write(proj.join("b.txt"), vec![5u8; 50_000]).unwrap();
+    std::fs::write(proj.join("c.txt"), b"third file").unwrap();
+
+    // Lock b.txt exclusively (FILE_SHARE_NONE) so the sender can't read it.
+    let locked = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(proj.join("b.txt"))
+        .unwrap();
+
+    let dst = tempfile::tempdir().unwrap();
+    let dst_path = dst.path().to_path_buf();
+    let server = make_server_endpoint().unwrap();
+    let server_addr = std::net::SocketAddr::from((
+        std::net::Ipv4Addr::LOCALHOST,
+        server.local_addr().unwrap().port(),
+    ));
+    let recv_task = tokio::spawn(async move {
+        let incoming = server.accept().await.unwrap();
+        let conn = incoming.await.unwrap();
+        receive_transfer(&conn, &dst_path, |_o| async { true }, |_n, _b, _t| {})
+            .await
+            .unwrap()
+    });
+
+    let client = make_client_endpoint().unwrap();
+    let conn = client
+        .connect(server_addr, "filedrop.local")
+        .unwrap()
+        .await
+        .unwrap();
+    let outcome = send_files(&conn, "T".into(), "p".into(), vec![proj.clone()], |_| {}, |_, _, _| {})
+        .await
+        .unwrap();
+    let recv_outcome = recv_task.await.unwrap();
+
+    drop(locked);
+
+    // The transfer should COMPLETE; the two readable files arrive, locked one doesn't.
+    assert!(outcome.accepted);
+    assert_eq!(outcome.files_sent, 2, "readable files should still send");
+    assert_eq!(recv_outcome.saved.len(), 2);
+    assert!(dst.path().join("proj").join("a.txt").exists());
+    assert!(dst.path().join("proj").join("c.txt").exists());
+    assert!(!dst.path().join("proj").join("b.txt").exists());
+}

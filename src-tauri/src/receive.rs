@@ -52,35 +52,58 @@ where
             tokio::fs::create_dir_all(parent).await.ok();
         }
 
-        let mut file = tokio::fs::File::create(&dest).await?;
+        // If we can't create the destination (e.g. path too long), we must
+        // still read the incoming stream to keep the protocol in sync, then
+        // report this one file as failed and move on.
+        let mut file = tokio::fs::File::create(&dest).await.ok();
         let mut hasher = Hasher::new();
         let mut buf = vec![0u8; CHUNK];
         let mut received: u64 = 0;
         let mut read_ok = true;
+        let mut err: Option<String> = if file.is_none() {
+            Some("couldn't create file on this device".into())
+        } else {
+            None
+        };
         loop {
             let n = match body.read(&mut buf).await {
                 Ok(Some(n)) => n,
                 Ok(None) => break,
-                Err(_) => { read_ok = false; break; }
+                Err(_) => {
+                    read_ok = false;
+                    err = Some("transfer interrupted".into());
+                    break;
+                }
             };
-            file.write_all(&buf[..n]).await?;
             hasher.update(&buf[..n]);
             received += n as u64;
+            if let Some(f) = file.as_mut() {
+                if f.write_all(&buf[..n]).await.is_err() {
+                    err = Some("couldn't write to disk".into());
+                    file = None; // stop writing but keep draining the stream
+                }
+            }
             on_progress(&display_name, received, header.size);
         }
-        file.flush().await?;
+        if let Some(f) = file.as_mut() {
+            let _ = f.flush().await;
+        }
 
         let digest = hasher.finalize_hex();
-        let ok = read_ok && digest == header.blake3_hex && received == header.size;
+        let integrity = digest == header.blake3_hex && received == header.size;
+        let ok = read_ok && err.is_none() && integrity;
         if ok {
             saved.push(dest.clone());
         } else {
             tokio::fs::remove_file(&dest).await.ok();
+            if err.is_none() {
+                err = Some("integrity check failed".into());
+            }
         }
         let ack = FileAck {
             name: display_name,
             ok,
-            error: if ok { None } else { Some("integrity check failed".into()) },
+            error: if ok { None } else { err },
         };
         write_msg(&mut ctrl_send, &ack).await?;
     }

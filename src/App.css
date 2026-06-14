@@ -131,9 +131,36 @@ body {
   gap: 0.6rem;
 }
 .identity-name {
+  font: inherit;
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--text-muted);
+  background: none;
+  border: none;
+  padding: 0.1rem 0.3rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.identity-name:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+.identity-name:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.identity-edit {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  width: 140px;
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+  outline: none;
 }
 .status-pill {
   display: inline-flex;

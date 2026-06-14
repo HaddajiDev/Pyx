@@ -15,6 +15,8 @@ export interface OutgoingFiles {
 
 export const getIdentity = () => invoke<Identity>("get_identity");
 export const listPeers = () => invoke<Peer[]>("list_peers");
+export const setDisplayName = (name: string) =>
+  invoke<string>("set_display_name", { name });
 export const getDownloadDir = () => invoke<string>("get_download_dir");
 export const setDownloadDir = (path: string) =>
   invoke<string>("set_download_dir", { path });

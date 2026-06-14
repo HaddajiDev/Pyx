@@ -25,6 +25,24 @@ pub fn respond_offer(transfer_id: String, accept: bool, state: State<'_, Arc<App
 }
 
 #[tauri::command]
+pub fn set_display_name(state: State<'_, Arc<AppState>>, name: String) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Name can't be empty".into());
+    }
+    let name: String = trimmed.chars().take(40).collect();
+    state.set_display_name(name.clone());
+
+    // Re-advertise over mDNS so other devices see the new name immediately.
+    if let Some(daemon) = state.mdns() {
+        let peer_id = state.identity.lock().unwrap().peer_id.clone();
+        let port = *state.server_port.lock().unwrap();
+        let _ = crate::discovery::announce(&daemon, &peer_id, &name, port);
+    }
+    Ok(name)
+}
+
+#[tauri::command]
 pub fn get_download_dir(state: State<'_, Arc<AppState>>) -> String {
     state.download_dir().to_string_lossy().to_string()
 }

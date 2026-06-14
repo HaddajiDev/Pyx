@@ -38,6 +38,8 @@ function App() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [dragPeerId, setDragPeerId] = useState<string | null>(null);
   const [downloadDir, setDownloadDir] = useState<string>("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   const [update, setUpdate] = useState<Update | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState(-1);
@@ -90,6 +92,18 @@ function App() {
     }
   }
 
+  async function saveName() {
+    const draft = nameDraft.trim();
+    setEditingName(false);
+    if (!draft || !identity || draft === identity.display_name) return;
+    try {
+      const newName = await api.setDisplayName(draft);
+      setIdentity({ ...identity, display_name: newName });
+    } catch (e) {
+      pushToast(`${e}`);
+    }
+  }
+
   async function changeFolder() {
     const picked = await open({ directory: true, title: "Choose download folder" });
     if (!picked || Array.isArray(picked)) return;
@@ -107,9 +121,13 @@ function App() {
 
     unlisteners.push(
       api.onPeerFound((p) =>
-        setPeers((prev) =>
-          prev.some((x) => x.peer_id === p.peer_id) ? prev : [...prev, p],
-        ),
+        setPeers((prev) => {
+          const i = prev.findIndex((x) => x.peer_id === p.peer_id);
+          if (i === -1) return [...prev, p];
+          const copy = [...prev];
+          copy[i] = p; // update (e.g. a peer renamed itself)
+          return copy;
+        }),
       ),
     );
     unlisteners.push(
@@ -303,7 +321,33 @@ function App() {
             <span className="status-dot" />
             {identity ? "Listening" : "Starting…"}
           </span>
-          {identity && <span className="identity-name">{identity.display_name}</span>}
+          {identity &&
+            (editingName ? (
+              <input
+                className="identity-edit"
+                autoFocus
+                value={nameDraft}
+                maxLength={40}
+                onChange={(e) => setNameDraft(e.currentTarget.value)}
+                onBlur={saveName}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveName();
+                  if (e.key === "Escape") setEditingName(false);
+                }}
+              />
+            ) : (
+              <button
+                type="button"
+                className="identity-name"
+                title="Click to rename this device"
+                onClick={() => {
+                  setNameDraft(identity.display_name);
+                  setEditingName(true);
+                }}
+              >
+                {identity.display_name}
+              </button>
+            ))}
         </div>
       </header>
 

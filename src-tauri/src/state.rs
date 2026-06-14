@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use mdns_sd::ServiceDaemon;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
@@ -33,6 +34,8 @@ pub struct Peer {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct Config {
     download_dir: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
 }
 
 fn default_download_dir() -> PathBuf {
@@ -46,6 +49,7 @@ pub struct AppState {
     pub pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
     download_dir: Mutex<PathBuf>,
     config_path: Mutex<Option<PathBuf>>,
+    mdns: Mutex<Option<ServiceDaemon>>,
 }
 
 impl AppState {
@@ -57,6 +61,7 @@ impl AppState {
             pending: Mutex::new(HashMap::new()),
             download_dir: Mutex::new(default_download_dir()),
             config_path: Mutex::new(None),
+            mdns: Mutex::new(None),
         }
     }
 
@@ -69,6 +74,23 @@ impl AppState {
         self.persist();
     }
 
+    pub fn display_name(&self) -> String {
+        self.identity.lock().unwrap().display_name.clone()
+    }
+
+    pub fn set_display_name(&self, name: String) {
+        self.identity.lock().unwrap().display_name = name;
+        self.persist();
+    }
+
+    pub fn set_mdns(&self, daemon: ServiceDaemon) {
+        *self.mdns.lock().unwrap() = Some(daemon);
+    }
+
+    pub fn mdns(&self) -> Option<ServiceDaemon> {
+        self.mdns.lock().unwrap().clone()
+    }
+
     pub fn load_config(&self, config_path: PathBuf) {
         if let Ok(bytes) = std::fs::read(&config_path) {
             if let Ok(cfg) = serde_json::from_slice::<Config>(&bytes) {
@@ -76,6 +98,11 @@ impl AppState {
                     let p = PathBuf::from(d);
                     if p.is_dir() {
                         *self.download_dir.lock().unwrap() = p;
+                    }
+                }
+                if let Some(n) = cfg.display_name {
+                    if !n.trim().is_empty() {
+                        self.identity.lock().unwrap().display_name = n;
                     }
                 }
             }
@@ -89,6 +116,7 @@ impl AppState {
         };
         let cfg = Config {
             download_dir: Some(self.download_dir().to_string_lossy().to_string()),
+            display_name: Some(self.display_name()),
         };
         if let Ok(json) = serde_json::to_vec_pretty(&cfg) {
             let _ = std::fs::write(path, json);

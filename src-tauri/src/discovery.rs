@@ -7,6 +7,20 @@ use crate::state::{AppState, Peer};
 
 const SERVICE_TYPE: &str = "_filedrop._udp.local.";
 
+pub fn announce(
+    daemon: &ServiceDaemon,
+    peer_id: &str,
+    name: &str,
+    port: u16,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let host = format!("{peer_id}.local.");
+    let properties = [("peer_id", peer_id), ("name", name)];
+    let service = ServiceInfo::new(SERVICE_TYPE, peer_id, &host, (), port, &properties[..])?
+        .enable_addr_auto();
+    daemon.register(service)?;
+    Ok(())
+}
+
 pub fn start(app: AppHandle, state: Arc<AppState>, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let daemon = ServiceDaemon::new()?;
 
@@ -15,25 +29,11 @@ pub fn start(app: AppHandle, state: Arc<AppState>, port: u16) -> Result<(), Box<
         (id.peer_id.clone(), id.display_name.clone())
     };
 
-    let host = format!("{peer_id}.local.");
-    let properties = [
-        ("peer_id", peer_id.as_str()),
-        ("name", display_name.as_str()),
-    ];
-    let service = ServiceInfo::new(
-        SERVICE_TYPE,
-        &peer_id,
-        &host,
-        (),
-        port,
-        &properties[..],
-    )?
-    .enable_addr_auto();
-
-    daemon.register(service)?;
+    announce(&daemon, &peer_id, &display_name, port)?;
 
     let receiver = daemon.browse(SERVICE_TYPE)?;
     let my_id = peer_id.clone();
+    let loop_state = state.clone();
 
     tauri::async_runtime::spawn(async move {
         while let Ok(event) = receiver.recv_async().await {
@@ -57,14 +57,14 @@ pub fn start(app: AppHandle, state: Arc<AppState>, port: u16) -> Result<(), Box<
                         .map(|ip| format!("{ip}:{}", info.get_port()));
                     if let Some(addr) = addr {
                         let peer = Peer { peer_id: found_id.clone(), display_name: name, addr };
-                        state.upsert_peer(peer.clone());
+                        loop_state.upsert_peer(peer.clone());
                         let _ = app.emit("peer-found", &peer);
                     }
                 }
                 ServiceEvent::ServiceRemoved(_ty, fullname) => {
                     let removed_id = fullname.split('.').next().unwrap_or("").to_string();
                     if !removed_id.is_empty() {
-                        state.remove_peer(&removed_id);
+                        loop_state.remove_peer(&removed_id);
                         let _ = app.emit("peer-lost", &removed_id);
                     }
                 }
@@ -73,6 +73,6 @@ pub fn start(app: AppHandle, state: Arc<AppState>, port: u16) -> Result<(), Box<
         }
     });
 
-    std::mem::forget(daemon);
+    state.set_mdns(daemon);
     Ok(())
 }

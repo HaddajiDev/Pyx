@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    env:
+      B2_BUCKET: ${{ vars.B2_BUCKET }}
+      B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+      AWS_DEFAULT_REGION: ${{ vars.B2_REGION }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.B2_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APP_KEY }}
+      PUBLIC_BASE: ${{ vars.PYX_PUBLIC_BASE }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build signed installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npm run tauri build
+
+      - name: Generate latest.json
+        id: meta
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+          $sigPath = "src-tauri/target/release/bundle/nsis/Pyx_${version}_x64-setup.exe.sig"
+          if (-not (Test-Path $sigPath)) { throw "signature not found at $sigPath" }
+          $sig = (Get-Content $sigPath -Raw).Trim()
+          $pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+          $manifest = [ordered]@{
+            version  = $version
+            notes    = "Pyx $version"
+            pub_date = $pubDate
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $sig
+                url       = "$env:PUBLIC_BASE/Pyx_${version}_x64-setup.exe"
+              }
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content latest.json -Encoding utf8
+          Write-Host "Built manifest for v$version"
+          Get-Content latest.json
+
+      - name: Upload installer + manifest to Backblaze B2
+        shell: pwsh
+        run: |
+          $version = "${{ steps.meta.outputs.version }}"
+          $exe = "src-tauri/target/release/bundle/nsis/Pyx_${version}_x64-setup.exe"
+
+          Write-Host "Uploading installer..."
+          aws s3 cp $exe "s3://$env:B2_BUCKET/pyx/Pyx_${version}_x64-setup.exe" `
+            --endpoint-url $env:B2_S3_ENDPOINT --content-type application/octet-stream
+          if ($LASTEXITCODE -ne 0) { throw "installer upload failed" }
+
+          Write-Host "Removing old manifest (if any)..."
+          aws s3 rm "s3://$env:B2_BUCKET/pyx/latest.json" --endpoint-url $env:B2_S3_ENDPOINT
+          if ($LASTEXITCODE -ne 0) { Write-Host "no existing latest.json to remove (ok)" }
+
+          Write-Host "Uploading new manifest..."
+          aws s3 cp latest.json "s3://$env:B2_BUCKET/pyx/latest.json" `
+            --endpoint-url $env:B2_S3_ENDPOINT --content-type application/json
+          if ($LASTEXITCODE -ne 0) { throw "manifest upload failed" }
+
+          Write-Host "Released v$version"

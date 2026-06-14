@@ -20,6 +20,8 @@ jobs:
       PUBLIC_BASE: https://f003.backblazeb2.com/file/dev67bucket/pyx
       AWS_ACCESS_KEY_ID: ${{ secrets.B2_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APP_KEY }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
 
     steps:
       - uses: actions/checkout@v4
@@ -89,5 +91,12 @@ jobs:
           aws s3 cp latest.json "s3://$env:B2_BUCKET/pyx/latest.json" `
             --endpoint-url $env:B2_S3_ENDPOINT --content-type application/json
           if ($LASTEXITCODE -ne 0) { throw "manifest upload failed" }
+
+          Write-Host "Verifying the files actually landed in the bucket..."
+          aws s3 ls "s3://$env:B2_BUCKET/pyx/" --endpoint-url $env:B2_S3_ENDPOINT
+          aws s3 ls "s3://$env:B2_BUCKET/pyx/Pyx_${version}_x64-setup.exe" --endpoint-url $env:B2_S3_ENDPOINT
+          if ($LASTEXITCODE -ne 0) { throw "installer is NOT in the bucket after upload" }
+          aws s3 ls "s3://$env:B2_BUCKET/pyx/latest.json" --endpoint-url $env:B2_S3_ENDPOINT
+          if ($LASTEXITCODE -ne 0) { throw "latest.json is NOT in the bucket after upload" }
 
           Write-Host "Released v$version"

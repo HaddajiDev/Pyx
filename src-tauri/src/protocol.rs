@@ -25,6 +25,15 @@ pub struct FileHeader {
     pub name: String,
     pub rel_path: String,
     pub size: u64,
+    // Whether the sender could open the file. When false, no body or trailer
+    // follows and the receiver marks this one file as failed (but keeps going).
+    pub ok: bool,
+}
+
+// Sent on the same stream after a file's bytes: lets the sender hash while
+// streaming (single pass) instead of pre-hashing the whole file first.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FileTrailer {
     pub blake3_hex: String,
 }
 
@@ -65,10 +74,18 @@ mod tests {
             name: "a.bin".into(),
             rel_path: "sub/a.bin".into(),
             size: 9,
-            blake3_hex: "deadbeef".into(),
+            ok: true,
         };
         let json = serde_json::to_vec(&h).unwrap();
         let back: FileHeader = serde_json::from_slice(&json).unwrap();
         assert_eq!(h, back);
+    }
+
+    #[test]
+    fn file_trailer_round_trips() {
+        let t = FileTrailer { blake3_hex: "deadbeef".into() };
+        let json = serde_json::to_vec(&t).unwrap();
+        let back: FileTrailer = serde_json::from_slice(&json).unwrap();
+        assert_eq!(t, back);
     }
 }

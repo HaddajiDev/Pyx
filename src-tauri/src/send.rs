@@ -4,7 +4,7 @@ use quinn::Connection;
 use tokio::io::AsyncReadExt;
 
 use crate::hash::Hasher;
-use crate::protocol::{AcceptDecision, FileAck, FileHeader, Offer, OfferedFile};
+use crate::protocol::{AcceptDecision, FileAck, FileHeader, FileTrailer, Offer, OfferedFile};
 use crate::protocol_io::{read_msg, write_msg};
 
 const CHUNK: usize = 64 * 1024;
@@ -27,20 +27,6 @@ fn base_name(path: &std::path::Path) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("file")
         .to_string()
-}
-
-async fn hash_file(path: &std::path::Path) -> std::io::Result<String> {
-    let mut file = tokio::fs::File::open(path).await?;
-    let mut hasher = Hasher::new();
-    let mut buf = vec![0u8; CHUNK];
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hasher.finalize_hex())
 }
 
 async fn plan_files(
@@ -114,39 +100,52 @@ where
 
     let mut files_sent = 0usize;
     for planned in &plan {
-        // A file we can't read (locked, permission-denied, vanished) must NOT
-        // abort the whole folder transfer. We still open the per-file stream so
-        // the receiver's stream count stays in sync, but send a placeholder
-        // header + empty body; the receiver's integrity check then rejects just
-        // that one file and the transfer continues.
-        let hash = hash_file(&planned.abs).await.ok();
-
         let mut body = conn.open_uni().await?;
+
+        // Open the file up front. If we can't (locked/permission), tell the
+        // receiver to skip it (ok: false) and move on — one bad file never
+        // aborts the whole folder.
+        let file = tokio::fs::File::open(&planned.abs).await;
         let header = FileHeader {
             name: base_name(&planned.abs),
             rel_path: planned.rel.clone(),
             size: planned.size,
-            blake3_hex: hash.clone().unwrap_or_default(),
+            ok: file.is_ok(),
         };
         write_msg(&mut body, &header).await?;
 
-        if hash.is_some() {
-            if let Ok(mut file) = tokio::fs::File::open(&planned.abs).await {
-                let mut buf = vec![0u8; CHUNK];
-                let mut sent: u64 = 0;
-                loop {
-                    match file.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            body.write_all(&buf[..n]).await?;
-                            sent += n as u64;
-                            on_progress(&planned.rel, sent, planned.size);
-                        }
-                        // File read error mid-stream: stop sending bytes; the
-                        // receiver sees a size mismatch and rejects this file.
-                        Err(_) => break,
+        if let Ok(mut file) = file {
+            // Stream and hash in a single pass — no separate pre-hash read, so
+            // progress flows continuously and big files don't freeze the UI.
+            let mut hasher = Hasher::new();
+            let mut buf = vec![0u8; CHUNK];
+            let mut sent: u64 = 0;
+            let mut read_ok = true;
+            loop {
+                let remaining = planned.size - sent;
+                if remaining == 0 {
+                    break;
+                }
+                let want = std::cmp::min(buf.len() as u64, remaining) as usize;
+                match file.read(&mut buf[..want]).await {
+                    Ok(0) => break, // file shorter than planned
+                    Ok(n) => {
+                        hasher.update(&buf[..n]);
+                        body.write_all(&buf[..n]).await?;
+                        sent += n as u64;
+                        on_progress(&planned.rel, sent, planned.size);
+                    }
+                    Err(_) => {
+                        read_ok = false;
+                        break;
                     }
                 }
+            }
+            // Only send the checksum trailer if the whole file streamed; a short
+            // body (read error / file shrank) is rejected by the receiver.
+            if read_ok && sent == planned.size {
+                let trailer = FileTrailer { blake3_hex: hasher.finalize_hex() };
+                write_msg(&mut body, &trailer).await?;
             }
         }
         body.finish()?;

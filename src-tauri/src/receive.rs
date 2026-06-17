@@ -6,7 +6,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::fileutil::safe_dest_path;
 use crate::hash::Hasher;
-use crate::protocol::{AcceptDecision, FileAck, FileHeader, Offer};
+use crate::protocol::{AcceptDecision, FileAck, FileHeader, FileTrailer, Offer};
 use crate::protocol_io::{read_msg, write_msg};
 
 const CHUNK: usize = 64 * 1024;
@@ -47,14 +47,25 @@ where
         let mut body = conn.accept_uni().await?;
         let header: FileHeader = read_msg(&mut body).await?;
         let display_name = header.rel_path.clone();
+
+        // Sender couldn't read this file; nothing follows on the stream.
+        if !header.ok {
+            let ack = FileAck {
+                name: display_name,
+                ok: false,
+                error: Some("couldn't be read on the sender".into()),
+            };
+            write_msg(&mut ctrl_send, &ack).await?;
+            continue;
+        }
+
         let dest = safe_dest_path(dest_dir, &header.rel_path);
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent).await.ok();
         }
 
-        // If we can't create the destination (e.g. path too long), we must
-        // still read the incoming stream to keep the protocol in sync, then
-        // report this one file as failed and move on.
+        // If we can't create the destination (e.g. path too long), still read
+        // the stream to keep the protocol in sync, then mark this file failed.
         let mut file = tokio::fs::File::create(&dest).await.ok();
         let mut hasher = Hasher::new();
         let mut buf = vec![0u8; CHUNK];
@@ -65,10 +76,17 @@ where
         } else {
             None
         };
+        // Read exactly `size` body bytes (capped so we never read into the
+        // trailer that follows on the same stream).
         loop {
-            let n = match body.read(&mut buf).await {
+            let remaining = header.size - received;
+            if remaining == 0 {
+                break;
+            }
+            let want = std::cmp::min(buf.len() as u64, remaining) as usize;
+            let n = match body.read(&mut buf[..want]).await {
                 Ok(Some(n)) => n,
-                Ok(None) => break,
+                Ok(None) => break, // stream ended before the full size
                 Err(_) => {
                     read_ok = false;
                     err = Some("transfer interrupted".into());
@@ -89,9 +107,17 @@ where
             let _ = f.flush().await;
         }
 
+        // Read the checksum trailer (only present when the full body arrived).
+        let full = received == header.size;
+        let mut trailer_hash = String::new();
+        if full {
+            if let Ok(t) = read_msg::<_, FileTrailer>(&mut body).await {
+                trailer_hash = t.blake3_hex;
+            }
+        }
+
         let digest = hasher.finalize_hex();
-        let integrity = digest == header.blake3_hex && received == header.size;
-        let ok = read_ok && err.is_none() && integrity;
+        let ok = read_ok && err.is_none() && full && digest == trailer_hash;
         if ok {
             saved.push(dest.clone());
         } else {

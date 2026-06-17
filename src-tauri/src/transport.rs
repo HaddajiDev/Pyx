@@ -14,12 +14,18 @@ pub fn ensure_crypto_provider() {
 }
 
 fn transport_config() -> Arc<quinn::TransportConfig> {
+    use quinn::VarInt;
     let mut tc = quinn::TransportConfig::default();
     let idle = std::time::Duration::from_secs(60)
         .try_into()
         .expect("valid idle timeout");
     tc.max_idle_timeout(Some(idle));
     tc.keep_alive_interval(Some(std::time::Duration::from_secs(15)));
+    // Generous flow-control windows so multi-GB transfers stream at full LAN
+    // speed instead of stalling on the small defaults.
+    tc.stream_receive_window(VarInt::from_u32(16 * 1024 * 1024));
+    tc.receive_window(VarInt::from_u32(512 * 1024 * 1024));
+    tc.send_window(512 * 1024 * 1024);
     Arc::new(tc)
 }
 
